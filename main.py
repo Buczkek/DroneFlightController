@@ -12,7 +12,14 @@ from mympu import MyMPU
 
 current_time = time.ticks_ms()  # get current time in milliseconds
 
-i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000)
+i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000) # TODO ZMIEŃ PORTY PO PRZELUTOWANIU
+# TODO  !!!
+# TODO  !!!
+# TODO  !!!
+# TODO  !!!
+# TODO  !!!
+
+
 # imu = MPU6050(i2c)
 mympu = MyMPU(i2c, leveled=True, filtered=True)
 
@@ -62,6 +69,82 @@ def convert(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
 
 
+# NRF24L01
+from nrf24l01 import NRF24L01
+import struct
+
+csn = Pin(14, mode=Pin.OUT, value=1)  # Chip Select Not
+ce = Pin(17, mode=Pin.OUT, value=0)  # Chip Enable
+led = Pin(25, Pin.OUT)  # Onboard LED
+payload_size = 32
+
+receive_pipe = b"\xd2\xf0\xf0\xf0\xf0"
+send_pipe = b"\xe1\xf0\xf0\xf0\xf0"
+
+def setup_nrf():
+    print("Initialising the nRF24L0+ Module")
+    nrf = NRF24L01(SPI(0), csn, ce, payload_size=payload_size)
+    nrf.open_tx_pipe(send_pipe)
+    nrf.open_rx_pipe(1, receive_pipe)
+    nrf.start_listening()
+    return nrf
+
+
+def flash_led(times: int = None):
+    ''' Flashed the built in LED the number of times defined in the times parameter '''
+    for _ in range(times):
+        led.value(1)
+        sleep(0.01)
+        led.value(0)
+        sleep(0.01)
+
+
+# def send(nrf, msg):
+#     msg += ';'
+#
+#     nrf.stop_listening()
+#     for n in range(len(msg)):
+#         try:
+#             encoded_string = msg[n].encode()
+#             byte_array = bytearray(encoded_string)
+#             buf = struct.pack("s", byte_array)
+#             nrf.send_start(buf)
+#             # print("message",msg[n],"sent")
+#             # print("sent")
+#             flash_led(1)
+#         except OSError:
+#             print("Sorry message not sent")
+#     print("message sent")
+#     nrf.start_listening()
+
+
+def send(nrf, msg):
+    msg += ';'
+
+    nrf.stop_listening()
+    try:
+        encoded_string = msg.encode()
+        byte_array = bytearray(encoded_string)
+        buf = struct.pack("s", byte_array)
+        nrf.send_start(byte_array)
+        print(f"msg: {msg}")
+        print(f"encoded_string: {encoded_string}")
+        print(f"byte_array: {byte_array}")
+        print(f"buf: {buf}")
+        # print("message",msg[n],"sent")
+        # print("sent")
+        flash_led(1)
+    except OSError:
+        print("Sorry message not sent")
+    print("message sent")
+    nrf.start_listening()
+
+
+# init nrf
+nrf = setup_nrf()
+nrf.start_listening()
+msg_string = ""
+
 while True:
     # time update
     last_time = current_time
@@ -76,6 +159,9 @@ while True:
     print(f"roll: {roll_angle}\u00B0 \t pitch: {pitch_angle}\u00B0 \t throttle: {throttle}")
     print(f"roll_error: {roll_error}\u00B0 \t pitch_error: {pitch_error}\u00B0 \t " +
           f"desired_roll: {roll_desired_angle}\u00B0 \t desired_pitch: {pitch_desired_angle}\u00B0")
+
+    message = f"roll: {roll_angle} pitch: {pitch_angle}"  # \n throttle: {throttle}"
+    send(nrf, message)
 
     # Calculate angle error
     pitch_error = pitch_desired_angle - pitch_angle
