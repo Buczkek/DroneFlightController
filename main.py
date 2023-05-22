@@ -12,7 +12,7 @@ from mympu import MyMPU
 
 current_time = time.ticks_ms()  # get current time in milliseconds
 
-i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000) # TODO ZMIEŃ PORTY PO PRZELUTOWANIU
+i2c = I2C(0, sda=Pin(12), scl=Pin(13), freq=400000)  # TODO ZMIEŃ PORTY PO PRZELUTOWANIU
 # TODO  !!!
 # TODO  !!!
 # TODO  !!!
@@ -133,7 +133,7 @@ def send(nrf, msg):
         print(f"buf: {buf}")
         # print("message",msg[n],"sent")
         # print("sent")
-        flash_led(1)
+        # flash_led(1)
     except OSError:
         print("Sorry message not sent")
     print("message sent")
@@ -153,7 +153,7 @@ while True:
     # print(f"delta_time: {delta_time} \t current_time: {current_time} \t last_time: {last_time}")
 
     # refresh data from IMU
-    roll, pitch = mympu.get_roll_pitch()
+    roll, pitch = mympu.get_roll_pitch_filtered_acc_based()
     roll_angle = round(roll)
     pitch_angle = round(pitch)
     print(f"roll: {roll_angle}\u00B0 \t pitch: {pitch_angle}\u00B0 \t throttle: {throttle}")

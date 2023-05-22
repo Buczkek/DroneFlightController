@@ -14,12 +14,20 @@ class MyMPU:
         self.pitch_raw = 0
         self.roll_out = 0
         self.pitch_out = 0
+
+        self.raw_ax = 0
+        self.raw_ay = 0
+        self.raw_az = 0
+        self.raw_gx = 0
+        self.raw_gy = 0
+        self.raw_gz = 0
+
         if self.leveled:
             self.calc_offset()
 
     def calc_offset(self):
         for i in range(100):
-            roll, pitch = self.get_raw_roll_pitch()
+            roll, pitch = self.get_raw_roll_pitch_acc_based()
             self.roll_offset += roll
             self.pitch_offset += pitch
             sleep(0.01)
@@ -34,31 +42,41 @@ class MyMPU:
         gy = round(self.imu.gyro.y, 2)
         gz = round(self.imu.gyro.z, 2)
 
-        roll = self.roll_raw
-        pitch = self.pitch_raw
+        self.raw_ax = ax
+        self.raw_ay = ay
+        self.raw_az = az
+        self.raw_gx = gx
+        self.raw_gy = gy
+        self.raw_gz = gz
 
+        self._calc_roll_pitch_acc_based()
+        # self._calc_roll_pitch_gyro_based()  # TODO ELO
+        self._calc_roll_pitch_filtered_acc_based()
+
+    def _calc_roll_pitch_acc_based(self) -> bool:
         try:
-            roll = (math.atan(ay / math.sqrt(ax ** 2 + az ** 2)) * 180 / math.pi)
+            roll = (math.atan(self.raw_ay / math.sqrt(self.raw_ax ** 2 + self.raw_az ** 2)) * 180 / math.pi)
+            pitch = (math.atan(-1 * self.raw_ax / math.sqrt(self.raw_ay ** 2 + self.raw_az ** 2)) * 180 / math.pi)
 
-            pitch = (math.atan(-1 * ax / math.sqrt(ay ** 2 + az ** 2)) * 180 / math.pi)
+            self.roll_raw = roll
+            self.pitch_raw = pitch
+            return True
         except ZeroDivisionError:
-            pass
-        self.roll_raw = roll
-        self.pitch_raw = pitch
+            return False
 
-    def get_raw_roll_pitch(self):
+    def get_raw_roll_pitch_acc_based(self):
         self._update()
         return self.roll_raw, self.pitch_raw
 
-    def get_roll_pitch(self):
+    def _calc_roll_pitch_filtered_acc_based(self):
+        self.roll_out = self.roll_out * .9 + (self.roll_raw - self.roll_offset) * .1
+        self.pitch_out = self.pitch_out * .9 + (self.pitch_raw - self.pitch_offset) * .1
+
+    def get_roll_pitch_filtered_acc_based(self):
         self._update()
-        if self.filtered:
-            self.roll_out = self.roll_out * .9 + (self.roll_raw - self.roll_offset) * .1
-            self.pitch_out = self.pitch_out * .9 + (self.pitch_raw - self.pitch_offset) * .1
-        else:
-            self.roll_out = self.roll_raw - self.roll_offset
-            self.pitch_out = self.pitch_raw - self.pitch_offset
         return self.roll_out, self.pitch_out
+
+    # def
 
     def get_offset(self):
         return self.roll_offset, self.pitch_offset
