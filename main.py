@@ -1,40 +1,39 @@
 import time
-import math
 
-import machine
-
-from machine import SPI, Pin, I2C
+from machine import SPI, Pin, I2C, PWM
 from time import sleep
-
-# from imu import MPU6050
 
 from mympu import MyMPU
 
 current_time = time.ticks_ms()  # get current time in milliseconds
 
-i2c = I2C(0, sda=Pin(12), scl=Pin(13), freq=400000)  # TODO ZMIEŃ PORTY PO PRZELUTOWANIU
-# TODO  !!!
-# TODO  !!!
-# TODO  !!!
-# TODO  !!!
-# TODO  !!!
+i2c = I2C(0, sda=Pin(12), scl=Pin(13), freq=400000)
 
+MOTOR_L_F = PWM(Pin(0))
+MOTOR_R_B = PWM(Pin(1))
+MOTOR_L_B = PWM(Pin(2))
+MOTOR_R_F = PWM(Pin(3))
+
+MOTOR_L_F.freq(50)
+MOTOR_R_B.freq(50)
+MOTOR_L_B.freq(50)
+MOTOR_R_F.freq(50)
 
 # imu = MPU6050(i2c)
 mympu = MyMPU(i2c, leveled=True, filtered=True)
 
-throttle = 1700
-PWM_MAX = 2000
-PWM_MIN = 1000
+throttle = 0
+PWM_MAX = 5300  # 2000
+PWM_MIN = 4960  # 1480? + 100
 
 pwm_L_F = 0
-idle_L_F = 1488
+idle_L_F = 4860  # 1478
 pwm_L_B = 0
-idle_L_B = 1488
+idle_L_B = 4860  # 1478
 pwm_R_F = 0
-idle_R_F = 1488
+idle_R_F = 4860  # 1478
 pwm_R_B = 0
-idle_R_B = 1488
+idle_R_B = 4860  # 1478
 
 roll_angle = 0
 roll_desired_angle = 0
@@ -42,7 +41,7 @@ roll_error = roll_desired_angle - roll_angle
 roll_PID = 0
 roll_PID_last = 0
 roll_p = 0
-roll_const_p = 0.7
+roll_const_p = 1
 roll_i = 0
 roll_const_i = 0.006
 roll_d = 0
@@ -54,7 +53,7 @@ pitch_error = pitch_desired_angle - pitch_angle
 pitch_PID = 0
 pitch_PID_last = 0
 pitch_p = 0
-pitch_const_p = 0.7
+pitch_const_p = 1
 pitch_i = 0
 pitch_const_i = 0.006
 pitch_d = 0
@@ -81,6 +80,7 @@ payload_size = 32
 receive_pipe = b"\xd2\xf0\xf0\xf0\xf0"
 send_pipe = b"\xe1\xf0\xf0\xf0\xf0"
 
+
 def setup_nrf():
     print("Initialising the nRF24L0+ Module")
     nrf = NRF24L01(SPI(0), csn, ce, payload_size=payload_size)
@@ -93,51 +93,45 @@ def setup_nrf():
 def flash_led(times: int = None):
     ''' Flashed the built in LED the number of times defined in the times parameter '''
     for _ in range(times):
-        led.value(1)
         sleep(0.01)
         led.value(0)
         sleep(0.01)
 
 
-# def send(nrf, msg):
-#     msg += ';'
-#
-#     nrf.stop_listening()
-#     for n in range(len(msg)):
-#         try:
-#             encoded_string = msg[n].encode()
-#             byte_array = bytearray(encoded_string)
-#             buf = struct.pack("s", byte_array)
-#             nrf.send_start(buf)
-#             # print("message",msg[n],"sent")
-#             # print("sent")
-#             flash_led(1)
-#         except OSError:
-#             print("Sorry message not sent")
-#     print("message sent")
-#     nrf.start_listening()
+def decode_angles(package: bytearray):
+    # command = int.from_bytes(package[:1], "big")
+    command = package[:1]
+    uid = int.from_bytes(package[2:12], "big")
+    if command != b'\x00\xf0':
+        throttle_target = int.from_bytes(package[-2:], "big")
+        pitch_target = int.from_bytes(package[-4:-2], "big") - 50
+        roll_target = int.from_bytes(package[-6:-4], "big") - 50
+        return throttle_target, pitch_target, roll_target, uid
+    return None
 
 
-def send(nrf, msg):
+def send_str(nrf, msg):
     msg += ';'
 
     nrf.stop_listening()
     try:
         encoded_string = msg.encode()
         byte_array = bytearray(encoded_string)
-        buf = struct.pack("s", byte_array)
         nrf.send_start(byte_array)
-        print(f"msg: {msg}")
-        print(f"encoded_string: {encoded_string}")
-        print(f"byte_array: {byte_array}")
-        print(f"buf: {buf}")
-        # print("message",msg[n],"sent")
-        # print("sent")
-        # flash_led(1)
     except OSError:
         print("Sorry message not sent")
-    print("message sent")
     nrf.start_listening()
+
+
+calibration = True
+if calibration:
+    input("Press enter to start calibration")
+    MOTOR_L_F.duty_u16(idle_L_F)
+    MOTOR_L_B.duty_u16(idle_L_B)
+    MOTOR_R_F.duty_u16(idle_R_F)
+    MOTOR_R_B.duty_u16(idle_R_B)
+    print("Now power on the ESCs")
+    input("Press enter to end calibration")
 
 
 # init nrf
@@ -145,23 +139,40 @@ nrf = setup_nrf()
 nrf.start_listening()
 msg_string = ""
 
+start_time = time.ticks_ms()
+last_sec = time.ticks_ms()
+times = 0
+ids = []
+
+
+pwm_L_F = 4860
+pwm_L_B = 4860
+pwm_R_F = 4860
+pwm_R_B = 4860
+
+first = True
+led.value(1)
 while True:
     # time update
     last_time = current_time
     current_time = time.ticks_ms()  # get current time in milliseconds
+    if time.ticks_diff(current_time, last_sec) > 1000:
+        last_sec = current_time
+        print(f"times: {times}")
+        times = 0
+    times += 1
     delta_time = time.ticks_diff(current_time, last_time) / 1000  # get delta time in seconds
-    # print(f"delta_time: {delta_time} \t current_time: {current_time} \t last_time: {last_time}")
+
+    if time.ticks_diff(current_time, start_time) > 3000 and first:
+        first = False
 
     # refresh data from IMU
     roll, pitch = mympu.get_roll_pitch_filtered_acc_based()
     roll_angle = round(roll)
     pitch_angle = round(pitch)
-    print(f"roll: {roll_angle}\u00B0 \t pitch: {pitch_angle}\u00B0 \t throttle: {throttle}")
-    print(f"roll_error: {roll_error}\u00B0 \t pitch_error: {pitch_error}\u00B0 \t " +
-          f"desired_roll: {roll_desired_angle}\u00B0 \t desired_pitch: {pitch_desired_angle}\u00B0")
 
     message = f"roll: {roll_angle} pitch: {pitch_angle}"  # \n throttle: {throttle}"
-    send(nrf, message)
+    send_str(nrf, message)
 
     # Calculate angle error
     pitch_error = pitch_desired_angle - pitch_angle
@@ -171,7 +182,7 @@ while True:
     # pitch
     pitch_p = pitch_const_p * pitch_error
 
-    if -3 < pitch_error < 3:
+    if -2 < pitch_error < 2:
         pitch_i += pitch_const_i * pitch_error
 
     pitch_d = pitch_const_d * (pitch_error - pitch_PID_last) / delta_time
@@ -183,7 +194,7 @@ while True:
     # roll
     roll_p = roll_const_p * roll_error
 
-    if -3 < roll_error < 3:
+    if -2 < roll_error < 2:
         roll_i += roll_const_i * roll_error
 
     roll_d = roll_const_d * (roll_error - roll_PID_last) / delta_time
@@ -197,16 +208,39 @@ while True:
     clamp(roll_PID, -200, 200)
 
     # Calculate PWM
-    pwm_L_F = throttle + pitch_PID + roll_PID
-    pwm_L_B = throttle - pitch_PID + roll_PID
-    pwm_R_F = throttle + pitch_PID - roll_PID
-    pwm_R_B = throttle - pitch_PID - roll_PID
+    if not first:
+        pwm_L_F = PWM_MIN + pitch_PID + roll_PID + throttle
+        pwm_L_B = PWM_MIN - pitch_PID + roll_PID + throttle
+        pwm_R_F = PWM_MIN + pitch_PID - roll_PID + throttle
+        pwm_R_B = PWM_MIN - pitch_PID - roll_PID + throttle
 
     # Clamp PWM values
-    pwm_L_F = clamp(pwm_L_F, PWM_MIN, PWM_MAX)
-    pwm_L_B = clamp(pwm_L_B, PWM_MIN, PWM_MAX)
-    pwm_R_F = clamp(pwm_R_F, PWM_MIN, PWM_MAX)
-    pwm_R_B = clamp(pwm_R_B, PWM_MIN, PWM_MAX)
+    pwm_L_F = int(clamp(pwm_L_F, PWM_MIN, PWM_MAX))
+    pwm_L_B = int(clamp(pwm_L_B, PWM_MIN, PWM_MAX))
+    pwm_R_F = int(clamp(pwm_R_F, PWM_MIN, PWM_MAX))
+    pwm_R_B = int(clamp(pwm_R_B, PWM_MIN, PWM_MAX))
+
+    # Set PWM
+    MOTOR_L_F.duty_u16(pwm_L_F)
+    MOTOR_L_B.duty_u16(pwm_L_B)
+    MOTOR_R_F.duty_u16(pwm_R_F)
+    MOTOR_R_B.duty_u16(pwm_R_B)
 
     # Print PWM values
-    print(f"pwm_L_F: {pwm_L_F}\tpwm_L_B: {pwm_L_B}\tpwm_R_F: {pwm_R_F}\tpwm_R_B: {pwm_R_B}")
+    print(f"pwm_L_F: {pwm_L_F}\tpwm_L_B: {pwm_L_B}\tpwm_R_F: {pwm_R_F}\tpwm_R_B: {pwm_R_B} throttle: {throttle}")
+
+    if nrf.any():
+        package = nrf.recv()
+
+        data = decode_angles(package)
+        if data is not None:
+            throttle_val, pitch_desired_angle, roll_desired_angle, uid = data
+            # throttle = convert(throttle_val, 0, 400, 4860, 5300)
+            throttle = throttle_val
+            if uid in ids:
+                print("duplicate")
+                continue
+            else:
+                ids.append(uid)
+                if len(ids) > 50:
+                    ids.pop(0)

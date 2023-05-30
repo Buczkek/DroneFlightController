@@ -237,7 +237,7 @@ class NRF24L01:
         self.cs(0)
         self.spi.readinto(self.buf, W_TX_PAYLOAD)
         self.spi.write(buf)
-        print(f"spi.write({buf})")
+        # print(f"spi.write({buf})")
         if len(buf) < self.payload_size:
             self.spi.write(b"\x00" * (self.payload_size - len(buf)))  # pad out data
         self.cs(1)
